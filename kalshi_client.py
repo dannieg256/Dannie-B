@@ -22,118 +22,30 @@ class KalshiClient:
             self.base_url = "https://external-api.demo.kalshi.co/trade-api/v2"
         self._private_key = None
 
-    def _load_private_key(self):
-    if self._private_key is not None:
-        return self._private_key
+        def _load_private_key(self):
+        if self._private_key is not None:
+            return self._private_key
 
-    private_key_text = os.getenv("KALSHI_PRIVATE_KEY", "")
+        private_key_text = os.getenv("KALSHI_PRIVATE_KEY", "")
 
-    if private_key_text:
-        key_bytes = private_key_text.replace("\\n", "\n").encode("utf-8")
-    else:
-        if not self.private_key_path:
-            raise RuntimeError("No Kalshi private key configured.")
-
-        p = Path(self.private_key_path)
-
-        if not p.exists():
-            raise RuntimeError(f"Private key file not found: {p}")
-
-        with p.open("rb") as f:
-            key_bytes = f.read()
-
-    self._private_key = serialization.load_pem_private_key(
-        key_bytes,
-        password=None,
-        backend=default_backend()
-    )
-
-    return self._private_key
-
-    def _signature(self, timestamp, method, path):
-        private_key = self._load_private_key()
-        path_without_query = path.split("?")[0]
-        message = f"{timestamp}{method.upper()}{path_without_query}".encode("utf-8")
-
-        if isinstance(private_key, Ed25519PrivateKey):
-            signature = private_key.sign(message)
+        if private_key_text:
+            key_bytes = private_key_text.replace("\\n", "\n").encode("utf-8")
         else:
-            signature = private_key.sign(
-                message,
-                padding.PSS(
-                    mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.DIGEST_LENGTH,
-                ),
-                hashes.SHA256(),
-            )
-        return base64.b64encode(signature).decode("utf-8")
+            if not self.private_key_path:
+                raise RuntimeError("No Kalshi private key configured.")
 
-    def _headers(self, method, endpoint):
-        if not self.api_key_id:
-            raise RuntimeError("KALSHI_API_KEY_ID is not configured.")
-        timestamp = str(int(datetime.datetime.now().timestamp() * 1000))
-        sign_path = urlparse(self.base_url + endpoint).path
-        return {
-            "KALSHI-ACCESS-KEY": self.api_key_id,
-            "KALSHI-ACCESS-SIGNATURE": self._signature(timestamp, method, sign_path),
-            "KALSHI-ACCESS-TIMESTAMP": timestamp,
-            "Content-Type": "application/json",
-        }
+            p = Path(self.private_key_path)
 
-    def public_get(self, endpoint, params=None):
-        r = requests.get(self.base_url + endpoint, params=params, timeout=15)
-        r.raise_for_status()
-        return r.json()
+            if not p.exists():
+                raise RuntimeError(f"Private key file not found: {p}")
 
-    def auth_get(self, endpoint, params=None):
-        r = requests.get(
-            self.base_url + endpoint,
-            headers=self._headers("GET", endpoint),
-            params=params,
-            timeout=15,
+            with p.open("rb") as f:
+                key_bytes = f.read()
+
+        self._private_key = serialization.load_pem_private_key(
+            key_bytes,
+            password=None,
+            backend=default_backend()
         )
-        r.raise_for_status()
-        return r.json()
 
-    def auth_post(self, endpoint, payload):
-        r = requests.post(
-            self.base_url + endpoint,
-            headers=self._headers("POST", endpoint),
-            json=payload,
-            timeout=15,
-        )
-        if not r.ok:
-            raise RuntimeError(f"Kalshi error {r.status_code}: {r.text}")
-        return r.json()
-
-    def get_markets(self, limit=100, status="open"):
-        return self.public_get("/markets", params={"limit": limit, "status": status})
-
-    def get_market(self, ticker):
-        return self.public_get(f"/markets/{ticker}")
-
-    def get_orderbook(self, ticker, depth=20):
-        return self.public_get(f"/markets/{ticker}/orderbook", params={"depth": depth})
-
-    def get_balance(self):
-        return self.auth_get("/portfolio/balance")
-
-    def get_positions(self):
-        return self.auth_get("/portfolio/positions")
-
-    def create_order(self, ticker, price, count, client_order_id):
-        payload = {
-            "ticker": ticker,
-            "client_order_id": client_order_id,
-            "side": "bid",
-            "count": str(count),
-            "price": f"{price:.4f}",
-            "time_in_force": "good_till_canceled",
-            "self_trade_prevention_type": "taker_at_cross",
-            "post_only": False,
-            "cancel_order_on_pause": True,
-            "reduce_only": False,
-            "subaccount": 0,
-            "exchange_index": 0,
-        }
-        return self.auth_post("/portfolio/events/orders", payload)
+        return self._private_key
