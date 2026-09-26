@@ -213,10 +213,25 @@ def home(request: Request):
             MIN_VOLUME,
         )
 
-        markets = [
-            fmt_market(m)
-            for m in filtered_markets
-        ]
+        markets = []
+
+for m in filtered_markets:
+    item = fmt_market(m)
+
+    bid = item.get("yes_bid")
+    ask = item.get("yes_ask")
+
+    # Only display markets with a real tradable price
+    if bid is None or ask is None:
+        continue
+
+    if bid <= 0 or ask <= 0:
+        continue
+
+    if bid >= 1 or ask >= 1:
+        continue
+
+    markets.append(item)
 
     except Exception as e:
         error = str(e)
