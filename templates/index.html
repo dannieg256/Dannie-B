@@ -1,41 +1,326 @@
 {% extends "base.html" %}
+
 {% block content %}
+
+<style>
+  .market-card {
+    position: relative;
+  }
+
+  .market-title {
+    font-size: 1.15rem;
+    line-height: 1.3;
+  }
+
+  .market-stats {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+    margin-top: 16px;
+  }
+
+  .stat-box {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid #293041;
+    border-radius: 12px;
+    padding: 12px;
+  }
+
+  .stat-label {
+    color: #9ba3b4;
+    font-size: 0.82rem;
+    margin-bottom: 4px;
+  }
+
+  .stat-value {
+    font-size: 1.15rem;
+    font-weight: 700;
+  }
+
+  .quality-row {
+    margin-top: 16px;
+  }
+
+  .quality-bar {
+    height: 10px;
+    border-radius: 999px;
+    background: #242b39;
+    overflow: hidden;
+    margin-top: 7px;
+  }
+
+  .quality-fill {
+    height: 100%;
+    background: #69aefc;
+    border-radius: 999px;
+  }
+
+  .quality-score {
+    font-size: 1.1rem;
+    font-weight: 700;
+  }
+
+  .spread-good {
+    font-weight: 700;
+  }
+
+  .market-rank {
+    color: #9ba3b4;
+    font-size: 0.85rem;
+    margin-bottom: 8px;
+  }
+
+  .activity-note {
+    margin-top: 12px;
+    font-size: 0.88rem;
+  }
+
+  @media (min-width: 650px) {
+    .market-stats {
+      grid-template-columns: repeat(4, 1fr);
+    }
+  }
+</style>
+
+
 <div class="card warning">
   <b>Manual approval is required for every order.</b>
-  <div class="muted">Max order ${{ limits.max_order }} · Daily ${{ limits.max_daily }} · Minimum edge {{ limits.min_edge }}% · Max spread {{ limits.max_spread }}¢</div>
-</div>
 
-{% if error %}
-<div class="card"><b>API error:</b> {{ error }}</div>
-{% endif %}
-
-<div class="card">
-  <h2>Open markets</h2>
-  <div class="muted">Tap a market, enter your estimated probability, then let the risk agents check it.</div>
-</div>
-
-{% for m in markets %}
-<div class="card">
-  <a href="/market/{{ m.ticker }}"><b>{{ m.title }}</b></a>
-  <div class="muted"><code>{{ m.ticker }}</code></div>
-  <div class="grid" style="margin-top:10px">
-    <div>YES bid<br><b>{{ "%.2f"|format(m.yes_bid or 0) }}</b></div>
-    <div>YES ask<br><b>{{ "%.2f"|format(m.yes_ask or 0) }}</b></div>
-    <div>Volume<br><b>{{ "%.0f"|format(m.volume) }}</b></div>
+  <div class="muted">
+    Max order ${{ limits.max_order }}
+    · Daily ${{ limits.max_daily }}
+    · Minimum edge {{ "%.1f"|format(limits.min_edge) }}%
+    · Max spread {{ "%.1f"|format(limits.max_spread) }}¢
   </div>
 </div>
-{% else %}
-<div class="card">No qualifying open markets returned.</div>
-{% endfor %}
 
-{% if paper_log %}
+
+{% if error %}
 <div class="card">
-  <h2>Recent simulated/live actions</h2>
-  {% for item in paper_log %}
-    <div style="padding:8px 0;border-top:1px solid #293041">
-      <b>{{ item.mode|upper }}</b> · {{ item.ticker }} · {{ item.count }} @ ${{ item.price }}
-    </div>
-  {% endfor %}
+  <b>API error:</b>
+  {{ error }}
 </div>
 {% endif %}
+
+
+<div class="card">
+  <h2>Market Scanner</h2>
+
+  <div class="muted">
+    Markets are ranked using liquidity, spread, recent activity,
+    open interest and available market depth.
+  </div>
+</div>
+
+
+{% for m in markets %}
+
+<div class="card market-card">
+
+  <div class="market-rank">
+    Market quality rank #{{ loop.index }}
+  </div>
+
+  <a
+    href="/market/{{ m.ticker }}"
+    class="market-title"
+  >
+    <b>{{ m.title }}</b>
+  </a>
+
+  <div class="muted" style="margin-top:6px;">
+    <code>{{ m.ticker }}</code>
+  </div>
+
+
+  <div class="market-stats">
+
+    <div class="stat-box">
+      <div class="stat-label">
+        YES bid
+      </div>
+
+      <div class="stat-value">
+        ${{ "%.2f"|format(m.yes_bid or 0) }}
+      </div>
+    </div>
+
+
+    <div class="stat-box">
+      <div class="stat-label">
+        YES ask
+      </div>
+
+      <div class="stat-value">
+        ${{ "%.2f"|format(m.yes_ask or 0) }}
+      </div>
+    </div>
+
+
+    <div class="stat-box">
+      <div class="stat-label">
+        Spread
+      </div>
+
+      <div class="stat-value spread-good">
+        {{ "%.1f"|format((m.spread or 0) * 100) }}¢
+      </div>
+    </div>
+
+
+    <div class="stat-box">
+      <div class="stat-label">
+        Midpoint
+      </div>
+
+      <div class="stat-value">
+        {{ "%.1f"|format((m.midpoint or 0) * 100) }}%
+      </div>
+    </div>
+
+
+    <div class="stat-box">
+      <div class="stat-label">
+        Total volume
+      </div>
+
+      <div class="stat-value">
+        {{ "%.0f"|format(m.volume or 0) }}
+      </div>
+    </div>
+
+
+    <div class="stat-box">
+      <div class="stat-label">
+        24h volume
+      </div>
+
+      <div class="stat-value">
+        {{ "%.0f"|format(m.volume_24h or 0) }}
+      </div>
+    </div>
+
+
+    <div class="stat-box">
+      <div class="stat-label">
+        Open interest
+      </div>
+
+      <div class="stat-value">
+        {{ "%.0f"|format(m.open_interest or 0) }}
+      </div>
+    </div>
+
+
+    <div class="stat-box">
+      <div class="stat-label">
+        Quality score
+      </div>
+
+      <div class="stat-value">
+        {{ "%.0f"|format(m.quality_score or 0) }}/100
+      </div>
+    </div>
+
+  </div>
+
+
+  <div class="quality-row">
+
+    <div>
+      <span class="muted">
+        Market quality
+      </span>
+
+      <span class="quality-score">
+        {{ "%.0f"|format(m.quality_score or 0) }}/100
+      </span>
+    </div>
+
+    <div class="quality-bar">
+      <div
+        class="quality-fill"
+        style="width: {{ [m.quality_score or 0, 100]|min }}%;"
+      ></div>
+    </div>
+
+  </div>
+
+
+  {% if m.bid_size is not none or m.ask_size is not none %}
+
+  <div class="activity-note muted">
+
+    {% if m.bid_size is not none %}
+      Bid depth:
+      {{ "%.0f"|format(m.bid_size) }}
+    {% endif %}
+
+    {% if m.bid_size is not none and m.ask_size is not none %}
+      ·
+    {% endif %}
+
+    {% if m.ask_size is not none %}
+      Ask depth:
+      {{ "%.0f"|format(m.ask_size) }}
+    {% endif %}
+
+  </div>
+
+  {% endif %}
+
+
+  {% if m.close_time %}
+
+  <div class="activity-note muted">
+    Close:
+    {{ m.close_time }}
+  </div>
+
+  {% endif %}
+
+</div>
+
+{% else %}
+
+<div class="card">
+  <b>No markets currently meet your filters.</b>
+
+  <div class="muted" style="margin-top:8px;">
+    This can happen when spreads are wider than your configured
+    maximum or the activity threshold removes the available markets.
+  </div>
+</div>
+
+{% endfor %}
+
+
+{% if paper_log %}
+
+<div class="card">
+
+  <h2>
+    Recent simulated/live actions
+  </h2>
+
+  {% for item in paper_log %}
+
+    <div
+      style="
+        padding:10px 0;
+        border-top:1px solid #293041;
+      "
+    >
+      <b>{{ item.mode|upper }}</b>
+      · {{ item.ticker }}
+      · {{ item.count }}
+      @ ${{ item.price }}
+    </div>
+
+  {% endfor %}
+
+</div>
+
+{% endif %}
+
 {% endblock %}
