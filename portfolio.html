@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>Portfolio agent</h2>
+  <h3>Balance</h3>
+  <pre style="white-space:pre-wrap">{{ result.balance }}</pre>
+  <h3>Positions</h3>
+  <pre style="white-space:pre-wrap">{{ result.positions }}</pre>
+</div>
+{% endblock %}

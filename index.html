@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card warning">
+  <b>Manual approval is required for every order.</b>
+  <div class="muted">Max order ${{ limits.max_order }} · Daily ${{ limits.max_daily }} · Minimum edge {{ limits.min_edge }}% · Max spread {{ limits.max_spread }}¢</div>
+</div>
+
+{% if error %}
+<div class="card"><b>API error:</b> {{ error }}</div>
+{% endif %}
+
+<div class="card">
+  <h2>Open markets</h2>
+  <div class="muted">Tap a market, enter your estimated probability, then let the risk agents check it.</div>
+</div>
+
+{% for m in markets %}
+<div class="card">
+  <a href="/market/{{ m.ticker }}"><b>{{ m.title }}</b></a>
+  <div class="muted"><code>{{ m.ticker }}</code></div>
+  <div class="grid" style="margin-top:10px">
+    <div>YES bid<br><b>{{ "%.2f"|format(m.yes_bid or 0) }}</b></div>
+    <div>YES ask<br><b>{{ "%.2f"|format(m.yes_ask or 0) }}</b></div>
+    <div>Volume<br><b>{{ "%.0f"|format(m.volume) }}</b></div>
+  </div>
+</div>
+{% else %}
+<div class="card">No qualifying open markets returned.</div>
+{% endfor %}
+
+{% if paper_log %}
+<div class="card">
+  <h2>Recent simulated/live actions</h2>
+  {% for item in paper_log %}
+    <div style="padding:8px 0;border-top:1px solid #293041">
+      <b>{{ item.mode|upper }}</b> · {{ item.ticker }} · {{ item.count }} @ ${{ item.price }}
+    </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

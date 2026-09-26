@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>{{ market.title }}</h2>
+  <div class="muted"><code>{{ market.ticker }}</code></div>
+  <div class="grid" style="margin-top:12px">
+    <div>YES bid<div class="big">${{ "%.2f"|format(data.yes_bid or 0) }}</div></div>
+    <div>YES ask<div class="big">${{ "%.2f"|format(data.yes_ask or 0) }}</div></div>
+    <div>Volume<div class="big">{{ "%.0f"|format(data.volume) }}</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Rules agent</h3>
+  <div><b>Close:</b> {{ rules.close_time or "not provided" }}</div>
+  <div class="muted">{{ rules.rules or "Open the official market details and confirm settlement criteria before trading." }}</div>
+</div>
+
+<div class="card">
+  <h3>Probability / value agents</h3>
+  <div>Current estimate: <b>{{ "%.1f"|format(probability*100) }}%</b></div>
+  <div class="muted">{{ prob_source }}</div>
+  {% if edge is not none %}
+  <div>Edge versus YES ask: <b>{{ "%+.1f"|format(edge*100) }} percentage points</b></div>
+  {% endif %}
+  <div>Liquidity: <b>{{ "PASS" if liquidity.passed else "FAIL" }}</b>
+    {% if liquidity.spread is not none %} · spread {{ "%.1f"|format(liquidity.spread*100) }}¢{% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h3>Prepare an order</h3>
+  <form action="/prepare/{{ market.ticker }}" method="post">
+    <label>Your estimated YES probability (%)</label>
+    <input name="probability_percent" type="number" min="1" max="99" step="0.1" value="{{ "%.1f"|format(probability*100) }}" required>
+    <label>Maximum dollars to risk (server cap ${{ max_order }})</label>
+    <input name="dollars" type="number" min="1" max="{{ max_order }}" step="1" value="{{ [5, max_order]|min }}" required>
+    <button class="green" type="submit">Run checks & prepare</button>
+  </form>
+  <p class="muted">A positive model edge is not a guarantee of profit. The system refuses candidates below the configured minimum edge.</p>
+</div>
+{% endblock %}

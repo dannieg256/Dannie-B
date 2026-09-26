@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card warning">
+  <h2>Review before approval</h2>
+  <div><b>{{ order.title }}</b></div>
+  <div class="muted"><code>{{ order.ticker }}</code></div>
+  <div class="grid" style="margin-top:15px">
+    <div>YES price<div class="big">${{ "%.2f"|format(order.price) }}</div></div>
+    <div>Contracts<div class="big">{{ order.count }}</div></div>
+    <div>Est. cost<div class="big">${{ "%.2f"|format(order.estimated_cost) }}</div></div>
+    <div>Your estimate<div class="big">{{ "%.1f"|format(order.estimated_probability*100) }}%</div></div>
+    <div>Calculated edge<div class="big">{{ "%+.1f"|format(order.edge*100) }}pp</div></div>
+  </div>
+</div>
+
+<div class="card">
+  {% if live %}
+  <p><b>LIVE TRADING IS ENABLED.</b> Tapping below can submit a real order.</p>
+  {% else %}
+  <p><b>PAPER MODE.</b> Tapping below records a simulation only.</p>
+  {% endif %}
+  <form action="/execute/{{ token }}" method="post">
+    <button class="{{ 'danger' if live else 'green' }}" type="submit">
+      {{ "APPROVE REAL ORDER" if live else "APPROVE PAPER ORDER" }}
+    </button>
+  </form>
+  <p><a href="/market/{{ order.ticker }}">Cancel and go back</a></p>
+</div>
+{% endblock %}
