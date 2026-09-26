@@ -24,6 +24,13 @@ from agents import (
 
 
 # ============================================================
+# BUILD
+# ============================================================
+
+APP_BUILD = "spread-filter-v3"
+
+
+# ============================================================
 # ENVIRONMENT
 # ============================================================
 
@@ -33,19 +40,27 @@ ENV = os.getenv("KALSHI_ENV", "demo").lower()
 LIVE_TRADING = os.getenv("LIVE_TRADING", "false").lower() == "true"
 
 API_KEY_ID = os.getenv("KALSHI_API_KEY_ID", "")
+
 PRIVATE_KEY_PATH = os.getenv(
     "KALSHI_PRIVATE_KEY_PATH",
     "./kalshi-private-key.pem",
 )
 
-MAX_ORDER = float(os.getenv("MAX_ORDER_DOLLARS", "10"))
-MAX_DAILY = float(os.getenv("MAX_DAILY_DOLLARS", "30"))
+MAX_ORDER = float(
+    os.getenv("MAX_ORDER_DOLLARS", "10")
+)
+
+MAX_DAILY = float(
+    os.getenv("MAX_DAILY_DOLLARS", "30")
+)
+
 MAX_EXPOSURE = float(
     os.getenv("MAX_OPEN_EXPOSURE_DOLLARS", "50")
 )
 
 MIN_EDGE = (
-    float(os.getenv("MIN_EDGE_PERCENT", "5")) / 100.0
+    float(os.getenv("MIN_EDGE_PERCENT", "5"))
+    / 100.0
 )
 
 MIN_VOLUME = float(
@@ -53,12 +68,13 @@ MIN_VOLUME = float(
 )
 
 MAX_SPREAD = (
-    float(os.getenv("MAX_SPREAD_CENTS", "15")) / 100.0
+    float(os.getenv("MAX_SPREAD_CENTS", "15"))
+    / 100.0
 )
 
 
 # ============================================================
-# FASTAPI
+# APP
 # ============================================================
 
 app = FastAPI(
@@ -82,7 +98,6 @@ client = KalshiClient(
     ENV,
 )
 
-# Public production market data.
 market_client = KalshiClient(
     "",
     "",
@@ -113,7 +128,7 @@ execution_agent = ExecutionAgent()
 
 
 # ============================================================
-# TEMPORARY APP STORAGE
+# TEMPORARY STORAGE
 # ============================================================
 
 pending_orders = {}
@@ -122,41 +137,87 @@ daily_spent = 0.0
 
 
 # ============================================================
-# HEALTH CHECK
+# HEALTH
 # ============================================================
 
 @app.get("/health")
 def health():
     return {
         "status": "ok",
+        "build": APP_BUILD,
         "environment": ENV,
         "live_trading": LIVE_TRADING,
+        "max_order": MAX_ORDER,
+        "max_daily": MAX_DAILY,
+        "max_exposure": MAX_EXPOSURE,
+        "min_edge_percent": MIN_EDGE * 100,
+        "min_volume": MIN_VOLUME,
+        "max_spread": MAX_SPREAD,
+        "max_spread_cents": MAX_SPREAD * 100,
     }
 
 
 # ============================================================
-# FORMAT MARKET
+# MARKET FILTER
 # ============================================================
 
-def fmt_market(m):
-    data = data_agent.run(m)
+def eligible_market(market):
+    data = data_agent.run(market)
 
     bid = data.get("yes_bid")
     ask = data.get("yes_ask")
+    volume = data.get("volume", 0)
 
-    midpoint = None
+    if bid is None or ask is None:
+        return None
 
-    if bid is not None and ask is not None:
-        midpoint = (bid + ask) / 2.0
+    try:
+        bid = float(bid)
+        ask = float(ask)
+        volume = float(volume or 0)
+    except (TypeError, ValueError):
+        return None
+
+    # Valid contract prices only.
+    if not 0 < bid < 1:
+        return None
+
+    if not 0 < ask < 1:
+        return None
+
+    if bid > ask:
+        return None
+
+    spread = ask - bid
+
+    # HARD FILTER:
+    # A market wider than the configured spread
+    # never reaches the homepage.
+    if spread > MAX_SPREAD:
+        return None
+
+    if volume < MIN_VOLUME:
+        return None
+
+    # Run the same liquidity agent used
+    # on the market detail page.
+    liquidity = liq_agent.run(
+        data,
+        MAX_SPREAD,
+    )
+
+    if not liquidity.get("passed", False):
+        return None
 
     return {
-        "ticker": m.get("ticker"),
-        "title": m.get("title"),
-        "volume": data.get("volume", 0),
+        "ticker": market.get("ticker"),
+        "title": market.get("title"),
+        "volume": volume,
         "yes_bid": bid,
         "yes_ask": ask,
-        "midpoint": midpoint,
-        "close_time": m.get("close_time"),
+        "midpoint": (bid + ask) / 2.0,
+        "spread": spread,
+        "close_time": market.get("close_time"),
     }
 
 
@@ -164,7 +225,10 @@ def fmt_market(m):
 # HOME
 # ============================================================
 
-@app.get("/", response_class=HTMLResponse)
+@app.get(
+    "/",
+    response_class=HTMLResponse,
+)
 def home(request: Request):
 
     error = None
@@ -181,50 +245,32 @@ def home(request: Request):
             [],
         )
 
-        filtered_markets = scanner.run(
+        scanned_markets = scanner.run(
             raw_markets,
             MIN_VOLUME,
         )
 
-        for m in filtered_markets:
+        for market in scanned_markets:
 
-            item = fmt_market(m)
+            item = eligible_market(
+                market
+            )
 
-            bid = item.get("yes_bid")
-            ask = item.get("yes_ask")
-
-            # Skip markets without usable prices.
-            if bid is None or ask is None:
+            if item is None:
                 continue
 
-            try:
-                bid = float(bid)
-                ask = float(ask)
-            except (TypeError, ValueError):
-                continue
+            markets.append(
+                item
+            )
 
-            # Skip empty or invalid prices.
-            if bid <= 0:
-                continue
-
-            if ask <= 0:
-                continue
-
-            if bid >= 1:
-                continue
-
-            if ask >= 1:
-                continue
-
-            # Bid should not be above ask.
-            if bid > ask:
-                continue
-
-            item["yes_bid"] = bid
-            item["yes_ask"] = ask
-            item["midpoint"] = (bid + ask) / 2.0
-
-            markets.append(item)
+        # Tightest spreads first,
+        # then highest volume.
+        markets.sort(
+            key=lambda item: (
+                item.get("spread", 999),
+                -item.get("volume", 0),
+            )
+        )
 
     except Exception as e:
         error = str(e)
@@ -249,6 +295,14 @@ def home(request: Request):
                     paper_log[-10:]
                 )
             ),
+        },
+        headers={
+            "Cache-Control": (
+                "no-store, no-cache, "
+                "must-revalidate, max-age=0"
+            ),
+            "Pragma": "no-cache",
+            "Expires": "0",
         },
     )
 
@@ -291,9 +345,11 @@ def market_page(
             market
         )
 
-        probability, prob_source = prob_agent.run(
-            data,
-            p,
+        probability, prob_source = (
+            prob_agent.run(
+                data,
+                p,
+            )
         )
 
         edge = value_agent.run(
@@ -321,6 +377,9 @@ def market_page(
                 "liquidity": liquidity,
                 "max_order": MAX_ORDER,
                 "min_edge": MIN_EDGE,
+            },
+            headers={
+                "Cache-Control": "no-store"
             },
         )
 
@@ -365,60 +424,45 @@ def prepare_order(
             market
         )
 
-        yes_ask = data.get(
+        bid = data.get(
+            "yes_bid"
+        )
+
+        ask = data.get(
             "yes_ask"
         )
 
-        if yes_ask is None:
+        if bid is None or ask is None:
             raise HTTPException(
                 status_code=400,
-                detail="No YES ask available.",
+                detail="Market is missing a usable bid or ask.",
             )
 
-        yes_ask = float(yes_ask)
+        bid = float(bid)
+        ask = float(ask)
 
-        if yes_ask <= 0 or yes_ask >= 1:
+        if not 0.01 <= ask <= 0.99:
             raise HTTPException(
                 status_code=400,
                 detail="Invalid YES ask price.",
             )
 
-        probability, _ = prob_agent.run(
-            data,
-            probability_percent / 100.0,
-        )
+        spread = ask - bid
 
-        edge = value_agent.run(
-            probability,
-            yes_ask,
-        )
+        # Recheck spread at order time.
+        if spread > MAX_SPREAD:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Spread is {spread * 100:.1f}¢. "
+                    f"Maximum allowed is "
+                    f"{MAX_SPREAD * 100:.1f}¢."
+                ),
+            )
 
         liquidity = liq_agent.run(
             data,
             MAX_SPREAD,
-        )
-
-        dollars = float(dollars)
-
-        dollars = max(
-            0.0,
-            min(
-                dollars,
-                MAX_ORDER,
-            ),
-        )
-
-        if dollars <= 0:
-            raise HTTPException(
-                status_code=400,
-                detail="Order amount must be greater than $0.",
-            )
-
-        risk = risk_agent.evaluate(
-            edge,
-            dollars,
-            daily_spent=daily_spent,
-            open_exposure=0.0,
         )
 
         if not liquidity.get(
@@ -437,6 +481,43 @@ def prepare_order(
                     )
                 ),
             )
+
+        probability, _ = prob_agent.run(
+            data,
+            probability_percent / 100.0,
+        )
+
+        edge = value_agent.run(
+            probability,
+            ask,
+        )
+
+        dollars = float(
+            dollars
+        )
+
+        dollars = max(
+            0.0,
+            min(
+                dollars,
+                MAX_ORDER,
+            ),
+        )
+
+        if dollars <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Order amount must be greater than $0."
+                ),
+            )
+
+        risk = risk_agent.evaluate(
+            edge,
+            dollars,
+            daily_spent=daily_spent,
+            open_exposure=0.0,
+        )
 
         if not risk.get(
             "passed",
@@ -457,7 +538,7 @@ def prepare_order(
 
         order = execution_agent.prepare(
             ticker,
-            yes_ask,
+            ask,
             dollars,
         )
 
@@ -470,6 +551,7 @@ def prepare_order(
             "title": market.get("title"),
             "estimated_probability": probability,
             "edge": edge,
+            "spread": spread,
         }
 
         return RedirectResponse(
@@ -488,7 +570,7 @@ def prepare_order(
 
 
 # ============================================================
-# APPROVAL PAGE
+# APPROVAL
 # ============================================================
 
 @app.get(
@@ -522,11 +604,14 @@ def approve_page(
             "env": ENV,
             "live": LIVE_TRADING,
         },
+        headers={
+            "Cache-Control": "no-store"
+        },
     )
 
 
 # ============================================================
-# EXECUTE ORDER
+# EXECUTE
 # ============================================================
 
 @app.post("/execute/{token}")
@@ -559,10 +644,7 @@ def execute(token: str):
         )
     )
 
-    # ========================================================
     # PAPER MODE
-    # ========================================================
-
     if not LIVE_TRADING:
 
         result = {
@@ -582,10 +664,7 @@ def execute(token: str):
             status_code=303,
         )
 
-    # ========================================================
-    # LIVE MODE SAFETY CHECK
-    # ========================================================
-
+    # LIVE TRADING MUST ALSO BE PRODUCTION.
     if ENV != "production":
         raise HTTPException(
             status_code=400,
@@ -595,10 +674,6 @@ def execute(token: str):
                 "Refusing to submit."
             ),
         )
-
-    # ========================================================
-    # LIVE ORDER
-    # ========================================================
 
     try:
         result = client.create_order(
@@ -641,7 +716,9 @@ def execute(token: str):
     "/portfolio",
     response_class=HTMLResponse,
 )
-def portfolio(request: Request):
+def portfolio(
+    request: Request
+):
 
     try:
         result = portfolio_agent.run(
@@ -654,6 +731,9 @@ def portfolio(request: Request):
                 "request": request,
                 "result": result,
                 "env": ENV,
+            },
+            headers={
+                "Cache-Control": "no-store"
             },
         )
 
