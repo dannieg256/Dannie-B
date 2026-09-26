@@ -23,62 +23,47 @@ from agents import (
 )
 
 
-# --------------------------------------------------
-# LOAD ENVIRONMENT VARIABLES
-# --------------------------------------------------
+# ============================================================
+# ENVIRONMENT
+# ============================================================
 
 load_dotenv()
 
 ENV = os.getenv("KALSHI_ENV", "demo").lower()
-
-LIVE_TRADING = (
-    os.getenv("LIVE_TRADING", "false").lower() == "true"
-)
+LIVE_TRADING = os.getenv("LIVE_TRADING", "false").lower() == "true"
 
 API_KEY_ID = os.getenv("KALSHI_API_KEY_ID", "")
-
 PRIVATE_KEY_PATH = os.getenv(
     "KALSHI_PRIVATE_KEY_PATH",
     "./kalshi-private-key.pem",
 )
 
-MAX_ORDER = float(
-    os.getenv("MAX_ORDER_DOLLARS", "10")
-)
-
-MAX_DAILY = float(
-    os.getenv("MAX_DAILY_DOLLARS", "30")
-)
-
+MAX_ORDER = float(os.getenv("MAX_ORDER_DOLLARS", "10"))
+MAX_DAILY = float(os.getenv("MAX_DAILY_DOLLARS", "30"))
 MAX_EXPOSURE = float(
     os.getenv("MAX_OPEN_EXPOSURE_DOLLARS", "50")
 )
 
 MIN_EDGE = (
-    float(os.getenv("MIN_EDGE_PERCENT", "5")) / 100
+    float(os.getenv("MIN_EDGE_PERCENT", "5")) / 100.0
 )
 
 MIN_VOLUME = float(
-    os.getenv("MIN_VOLUME", "50")
+    os.getenv("MIN_VOLUME", "0")
 )
 
 MAX_SPREAD = (
-    float(os.getenv("MAX_SPREAD_CENTS", "15")) / 100
+    float(os.getenv("MAX_SPREAD_CENTS", "15")) / 100.0
 )
 
 
-# --------------------------------------------------
-# FASTAPI APP
-# --------------------------------------------------
+# ============================================================
+# FASTAPI
+# ============================================================
 
 app = FastAPI(
     title="Kalshi 9-Agent Dashboard"
 )
-
-
-# --------------------------------------------------
-# TEMPLATES
-# --------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -87,9 +72,9 @@ templates = Jinja2Templates(
 )
 
 
-# --------------------------------------------------
-# KALSHI CLIENTS
-# --------------------------------------------------
+# ============================================================
+# CLIENTS
+# ============================================================
 
 client = KalshiClient(
     API_KEY_ID,
@@ -97,7 +82,7 @@ client = KalshiClient(
     ENV,
 )
 
-# Used for public market information.
+# Public production market data.
 market_client = KalshiClient(
     "",
     "",
@@ -105,20 +90,15 @@ market_client = KalshiClient(
 )
 
 
-# --------------------------------------------------
+# ============================================================
 # AGENTS
-# --------------------------------------------------
+# ============================================================
 
 scanner = MarketScannerAgent()
-
 rules_agent = RulesAgent()
-
 data_agent = DataAgent()
-
 prob_agent = ProbabilityAgent()
-
 value_agent = ValueAgent()
-
 liq_agent = LiquidityAgent()
 
 risk_agent = RiskAgent(
@@ -129,24 +109,21 @@ risk_agent = RiskAgent(
 )
 
 portfolio_agent = PortfolioAgent()
-
 execution_agent = ExecutionAgent()
 
 
-# --------------------------------------------------
-# APP MEMORY
-# --------------------------------------------------
+# ============================================================
+# TEMPORARY APP STORAGE
+# ============================================================
 
 pending_orders = {}
-
 paper_log = []
-
 daily_spent = 0.0
 
 
-# --------------------------------------------------
+# ============================================================
 # HEALTH CHECK
-# --------------------------------------------------
+# ============================================================
 
 @app.get("/health")
 def health():
@@ -157,9 +134,9 @@ def health():
     }
 
 
-# --------------------------------------------------
+# ============================================================
 # FORMAT MARKET
-# --------------------------------------------------
+# ============================================================
 
 def fmt_market(m):
     data = data_agent.run(m)
@@ -167,10 +144,10 @@ def fmt_market(m):
     bid = data.get("yes_bid")
     ask = data.get("yes_ask")
 
+    midpoint = None
+
     if bid is not None and ask is not None:
-        midpoint = (bid + ask) / 2
-    else:
-        midpoint = None
+        midpoint = (bid + ask) / 2.0
 
     return {
         "ticker": m.get("ticker"),
@@ -183,18 +160,14 @@ def fmt_market(m):
     }
 
 
-# --------------------------------------------------
-# HOME PAGE
-# --------------------------------------------------
+# ============================================================
+# HOME
+# ============================================================
 
-@app.get(
-    "/",
-    response_class=HTMLResponse,
-)
+@app.get("/", response_class=HTMLResponse)
 def home(request: Request):
 
     error = None
-
     markets = []
 
     try:
@@ -203,35 +176,55 @@ def home(request: Request):
             status="open",
         )
 
-        raw = response.get(
+        raw_markets = response.get(
             "markets",
             [],
         )
 
         filtered_markets = scanner.run(
-            raw,
+            raw_markets,
             MIN_VOLUME,
         )
 
-        markets = []
+        for m in filtered_markets:
 
-for m in filtered_markets:
-    item = fmt_market(m)
+            item = fmt_market(m)
 
-    bid = item.get("yes_bid")
-    ask = item.get("yes_ask")
+            bid = item.get("yes_bid")
+            ask = item.get("yes_ask")
 
-    # Only display markets with a real tradable price
-    if bid is None or ask is None:
-        continue
+            # Skip markets without usable prices.
+            if bid is None or ask is None:
+                continue
 
-    if bid <= 0 or ask <= 0:
-        continue
+            try:
+                bid = float(bid)
+                ask = float(ask)
+            except (TypeError, ValueError):
+                continue
 
-    if bid >= 1 or ask >= 1:
-        continue
+            # Skip empty or invalid prices.
+            if bid <= 0:
+                continue
 
-    markets.append(item)
+            if ask <= 0:
+                continue
+
+            if bid >= 1:
+                continue
+
+            if ask >= 1:
+                continue
+
+            # Bid should not be above ask.
+            if bid > ask:
+                continue
+
+            item["yes_bid"] = bid
+            item["yes_ask"] = ask
+            item["midpoint"] = (bid + ask) / 2.0
+
+            markets.append(item)
 
     except Exception as e:
         error = str(e)
@@ -260,9 +253,9 @@ for m in filtered_markets:
     )
 
 
-# --------------------------------------------------
+# ============================================================
 # MARKET PAGE
-# --------------------------------------------------
+# ============================================================
 
 @app.get(
     "/market/{ticker}",
@@ -298,11 +291,9 @@ def market_page(
             market
         )
 
-        probability, prob_source = (
-            prob_agent.run(
-                data,
-                p,
-            )
+        probability, prob_source = prob_agent.run(
+            data,
+            p,
         )
 
         edge = value_agent.run(
@@ -343,13 +334,11 @@ def market_page(
         )
 
 
-# --------------------------------------------------
+# ============================================================
 # PREPARE ORDER
-# --------------------------------------------------
+# ============================================================
 
-@app.post(
-    "/prepare/{ticker}"
-)
+@app.post("/prepare/{ticker}")
 def prepare_order(
     ticker: str,
     probability_percent: float = Form(...),
@@ -386,6 +375,14 @@ def prepare_order(
                 detail="No YES ask available.",
             )
 
+        yes_ask = float(yes_ask)
+
+        if yes_ask <= 0 or yes_ask >= 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid YES ask price.",
+            )
+
         probability, _ = prob_agent.run(
             data,
             probability_percent / 100.0,
@@ -401,10 +398,12 @@ def prepare_order(
             MAX_SPREAD,
         )
 
+        dollars = float(dollars)
+
         dollars = max(
             0.0,
             min(
-                float(dollars),
+                dollars,
                 MAX_ORDER,
             ),
         )
@@ -468,9 +467,7 @@ def prepare_order(
 
         pending_orders[token] = {
             **order,
-            "title": market.get(
-                "title"
-            ),
+            "title": market.get("title"),
             "estimated_probability": probability,
             "edge": edge,
         }
@@ -490,9 +487,9 @@ def prepare_order(
         )
 
 
-# --------------------------------------------------
-# APPROVE ORDER PAGE
-# --------------------------------------------------
+# ============================================================
+# APPROVAL PAGE
+# ============================================================
 
 @app.get(
     "/approve/{token}",
@@ -528,16 +525,12 @@ def approve_page(
     )
 
 
-# --------------------------------------------------
+# ============================================================
 # EXECUTE ORDER
-# --------------------------------------------------
+# ============================================================
 
-@app.post(
-    "/execute/{token}"
-)
-def execute(
-    token: str,
-):
+@app.post("/execute/{token}")
+def execute(token: str):
 
     global daily_spent
 
@@ -566,9 +559,9 @@ def execute(
         )
     )
 
-    # ----------------------------------------------
+    # ========================================================
     # PAPER MODE
-    # ----------------------------------------------
+    # ========================================================
 
     if not LIVE_TRADING:
 
@@ -589,13 +582,11 @@ def execute(
             status_code=303,
         )
 
-
-    # ----------------------------------------------
+    # ========================================================
     # LIVE MODE SAFETY CHECK
-    # ----------------------------------------------
+    # ========================================================
 
     if ENV != "production":
-
         raise HTTPException(
             status_code=400,
             detail=(
@@ -605,13 +596,11 @@ def execute(
             ),
         )
 
-
-    # ----------------------------------------------
+    # ========================================================
     # LIVE ORDER
-    # ----------------------------------------------
+    # ========================================================
 
     try:
-
         result = client.create_order(
             order["ticker"],
             order["price"],
@@ -635,7 +624,6 @@ def execute(
         )
 
     except Exception as e:
-
         raise HTTPException(
             status_code=500,
             detail=(
@@ -645,20 +633,17 @@ def execute(
         )
 
 
-# --------------------------------------------------
-# PORTFOLIO PAGE
-# --------------------------------------------------
+# ============================================================
+# PORTFOLIO
+# ============================================================
 
 @app.get(
     "/portfolio",
     response_class=HTMLResponse,
 )
-def portfolio(
-    request: Request,
-):
+def portfolio(request: Request):
 
     try:
-
         result = portfolio_agent.run(
             client
         )
@@ -673,7 +658,6 @@ def portfolio(
         )
 
     except Exception as e:
-
         raise HTTPException(
             status_code=500,
             detail=str(e),
