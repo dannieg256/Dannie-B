@@ -27,7 +27,7 @@ from agents import (
 # BUILD
 # ============================================================
 
-APP_BUILD = "spread-filter-v3"
+APP_BUILD = "quality-dashboard-v4"
 
 
 # ============================================================
