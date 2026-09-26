@@ -32,8 +32,8 @@ MAX_SPREAD = float(os.getenv("MAX_SPREAD_CENTS", "15")) / 100
 
 app = FastAPI(title="Kalshi 9-Agent Dashboard")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
-
 client = KalshiClient(API_KEY_ID, PRIVATE_KEY_PATH, ENV)
+market_client = KalshiClient("", "", "production")
 scanner = MarketScannerAgent()
 rules_agent = RulesAgent()
 data_agent = DataAgent()
@@ -68,8 +68,9 @@ def fmt_market(m):
 def home(request: Request):
     error = None
     markets = []
-    try:
-        raw = client.get_markets(limit=100, status="open").get("markets", [])
+    try
+    
+        raw = market_client.get_markets(limit=100, status="open").get("markets", [])
         markets = [fmt_market(m) for m in scanner.run(raw, MIN_VOLUME)]
     except Exception as e:
         error = str(e)
@@ -93,7 +94,7 @@ def home(request: Request):
 
 @app.get("/market/{ticker}", response_class=HTMLResponse)
 def market_page(request: Request, ticker: str, p: Optional[float] = None):
-    market = client.get_market(ticker).get("market", {})
+    market = market_client.get_market(ticker).get("market", {})
     data = data_agent.run(market)
     rules = rules_agent.run(market)
     probability, prob_source = prob_agent.run(data, p)
@@ -122,7 +123,7 @@ def prepare_order(
     probability_percent: float = Form(...),
     dollars: float = Form(...),
 ):
-    market = client.get_market(ticker).get("market", {})
+    market = market_client.get_market(ticker).get("market", {})
     data = data_agent.run(market)
 
     probability, _ = prob_agent.run(data, probability_percent / 100.0)
